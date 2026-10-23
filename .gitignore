@@ -1,1 +1,4 @@
-.github/
+__pycache__/
+build/
+dist/
+*.spec

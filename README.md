@@ -55,4 +55,5 @@ python tile_splitter.py
 
 Pushing a `v*` tag runs the GitHub Actions workflow on a Windows
 runner, which builds `TileSplitter.exe` with PyInstaller and attaches
-it to the release.
+it to the release. Or run `BUILD-WINDOWS.bat` on any Windows PC with
+Python 3 installed, it builds the same exe into `dist\`.
