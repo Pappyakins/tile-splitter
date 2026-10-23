@@ -19,7 +19,22 @@ across several panels.
   - `tile_R<row>C<col>.png`, one file per panel, at exact print size
     and DPI (300 by default)
   - `assembly-map.png`, the labelled layout picture
+  - `film-layout.png`, the Roll to Film plan (below)
   - `job.txt`, sizes and settings for the job
+
+## Roll to Film mode (eufyMake E1)
+
+Built around the E1 Roll-to-Film attachment's real limits: film
+100 to 305 mm wide, up to 10 m continuous per job, about 200 mm of
+blank leader at the start of every job. Set the film width in the app
+(305 mm by default) and every job also gets:
+
+- a film layout picture: leader band first, then every piece at its
+  true position and size down the roll, ready to cut apart
+- the total film the job uses, leader and cutting gaps included,
+  in `job.txt` and in the app summary
+- pieces wider than the film are placed rotated 90 degrees when they
+  fit that way, and flagged with flatbed advice when they do not
 
 ## Get the app
 

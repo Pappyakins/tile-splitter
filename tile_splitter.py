@@ -10,7 +10,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from tiles_core import plan_tiles, split_image, assembly_map, job_summary
+from tiles_core import (plan_tiles, split_image, assembly_map, job_summary,
+                        plan_film, film_summary, film_layout_image)
 
 PRESETS = {
     "12 x 16 in": (12.0, 16.0),
@@ -39,13 +40,14 @@ class App(tk.Tk):
         self.rows = tk.StringVar(value="1")
         self.gap = tk.StringVar(value="0.75")
         self.dpi = tk.StringVar(value="300")
+        self.film_w = tk.StringVar(value="305")
         self.preset = tk.StringVar(value="12 x 16 in")
         self.status = tk.StringVar(value="Open a picture to begin.")
         self.summary = tk.StringVar(value="")
 
         self._build_ui()
         for var in (self.tile_w, self.tile_h, self.cols, self.rows,
-                    self.gap, self.dpi):
+                    self.gap, self.dpi, self.film_w):
             var.trace_add("write", lambda *_: self._schedule_preview())
 
     # ---------------- UI ----------------
@@ -73,6 +75,7 @@ class App(tk.Tk):
         self._field(left, "Panels down", self.rows)
         self._field(left, "Hanging gap (in)", self.gap)
         self._field(left, "Print DPI", self.dpi)
+        self._field(left, "Film width (mm, Roll to Film)", self.film_w)
 
         ttk.Label(left, textvariable=self.summary, wraplength=250,
                   foreground="#234").pack(fill="x", pady=(8, 4))
@@ -108,11 +111,12 @@ class App(tk.Tk):
         rows = int(self.rows.get())
         gap = float(self.gap.get())
         dpi = int(self.dpi.get())
+        film_w = float(self.film_w.get())
         if min(tw, th) <= 0 or cols < 1 or rows < 1 or gap < 0 or dpi < 36:
             raise ValueError
-        if cols > 12 or rows > 12:
+        if cols > 12 or rows > 12 or film_w < 50 or film_w > 1000:
             raise ValueError
-        return tw, th, cols, rows, gap, dpi
+        return tw, th, cols, rows, gap, dpi, film_w
 
     def open_image(self):
         path = filedialog.askopenfilename(
@@ -143,7 +147,7 @@ class App(tk.Tk):
         if self.img is None:
             return
         try:
-            tw, th, cols, rows, gap, dpi = self._numbers()
+            tw, th, cols, rows, gap, dpi, film_w = self._numbers()
         except ValueError:
             self.summary.set("Check the numbers: sizes above zero, "
                              "panels 1 to 12, DPI 36 or more.")
@@ -156,11 +160,17 @@ class App(tk.Tk):
         quality = ("Sharp print" if eff >= 250 else
                    "Good print" if eff >= 150 else
                    "May look soft, use a bigger photo or smaller panels")
+        fp = plan_film(tw, th, cols * rows, film_w)
+        film_line = (f"Film: {fp['total_mm'] / 1000:.2f} m of "
+                     f"{film_w:.0f} mm roll incl. leader"
+                     if fp["fits"] else
+                     "Film: pieces too wide for the roll, flatbed only")
         self.summary.set(
             f"Wall size: {total_w:.1f} x {total_h:.1f} in "
             f"({total_w * 2.54:.0f} x {total_h * 2.54:.0f} cm)\n"
             f"Each tile prints at {ow} x {oh} px\n"
-            f"Photo gives about {eff:.0f} px per inch: {quality}")
+            f"Photo gives about {eff:.0f} px per inch: {quality}\n"
+            f"{film_line}")
         avail_w = max(420, self.preview.winfo_width() - 8)
         amap = assembly_map(self.img, plan, gap, tw, th,
                             max_w=min(1100, avail_w))
@@ -172,7 +182,7 @@ class App(tk.Tk):
             messagebox.showinfo("No picture", "Open a picture first.")
             return
         try:
-            tw, th, cols, rows, gap, dpi = self._numbers()
+            tw, th, cols, rows, gap, dpi, film_w = self._numbers()
         except ValueError:
             messagebox.showerror("Check the numbers",
                                  "Sizes must be above zero, panels 1 to 12.")
@@ -187,16 +197,21 @@ class App(tk.Tk):
             piece.save(os.path.join(folder, name + ".png"))
         assembly_map(self.img, plan, gap, tw, th, max_w=1600).save(
             os.path.join(folder, "assembly-map.png"))
+        fp = plan_film(tw, th, cols * rows, film_w)
+        fimg = film_layout_image(self.img, plan, fp)
+        if fimg is not None:
+            fimg.save(os.path.join(folder, "film-layout.png"))
         with open(os.path.join(folder, "job.txt"), "w") as f:
             f.write(job_summary(plan, tw, th, cols, rows, gap, dpi,
-                                self.img_name))
+                                self.img_name,
+                                film_text=film_summary(fp, cols * rows)))
         self.status.set(f"Saved {len(tiles)} tiles plus the assembly map "
                         f"to {folder}")
         messagebox.showinfo(
             "Done",
             f"{len(tiles)} print ready tiles saved.\n\n"
             "Open assembly-map.png to see which tile goes where, "
-            "and job.txt for the sizes.")
+            "film-layout.png for the roll plan, and job.txt for the sizes.")
 
 
 if __name__ == "__main__":
