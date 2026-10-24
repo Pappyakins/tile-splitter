@@ -17,7 +17,7 @@ from tiles_core import (plan_tiles, split_image, assembly_map, job_summary,
                         plan_mixed, assembly_map_mixed, job_summary_mixed,
                         plan_film_pieces, film_summary_pieces)
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # Standard sizes are multiples of 12 in, matching the 12 inch print
 # width of the roll to film attachment. Anything else stays available
