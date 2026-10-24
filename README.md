@@ -8,9 +8,14 @@ across several panels.
 
 - Open any picture (JPG, PNG, WebP, BMP)
 - Two layouts, picked in the app:
-  - **Uniform grid**: pick a panel size (presets like 12 x 16 in, or
-    custom), how many panels across and down, and the hanging gap
-    between panels. Tiles are saved as `tile_R<row>C<col>.png`
+  - **Uniform grid**: pick a panel size, how many panels across and
+    down, and the hanging gap between panels. Tiles are saved as
+    `tile_R<row>C<col>.png`
+- Standard sizes are multiples of 12 in, matching the 12 inch print
+  width of the roll to film attachment: 12 x 12, 12 x 24, 24 x 24,
+  12 x 36 and 24 x 36, in the grid presets and the mixed mode quick
+  add buttons. Any other size (12 x 16, 11 x 14, ...) still works,
+  just type it in or pick Custom
   - **Mixed sizes side by side**: stack different sized panels next
     to each other in one row, like a 12 x 16, an 8 x 10 and another
     12 x 16. Panels are centre-aligned vertically against the tallest

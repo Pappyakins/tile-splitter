@@ -19,16 +19,20 @@ from tiles_core import (plan_tiles, split_image, assembly_map, job_summary,
 
 VERSION = "1.2.0"
 
+# Standard sizes are multiples of 12 in, matching the 12 inch print
+# width of the roll to film attachment. Anything else stays available
+# through Custom and the free entry fields.
 PRESETS = {
-    "12 x 16 in": (12.0, 16.0),
-    "11 x 14 in": (11.0, 14.0),
-    "8 x 10 in": (8.0, 10.0),
     "12 x 12 in": (12.0, 12.0),
-    "16 x 20 in": (16.0, 20.0),
+    "12 x 24 in": (12.0, 24.0),
+    "24 x 24 in": (24.0, 24.0),
+    "12 x 36 in": (12.0, 36.0),
+    "24 x 36 in": (24.0, 36.0),
     "Custom": None,
 }
 
-MIXED_PRESETS = [(12.0, 16.0), (11.0, 14.0), (8.0, 10.0), (12.0, 12.0)]
+MIXED_PRESETS = [(12.0, 12.0), (12.0, 24.0), (24.0, 24.0),
+                 (12.0, 36.0), (24.0, 36.0)]
 MAX_MIXED_PANELS = 8
 
 
@@ -49,13 +53,13 @@ class App(tk.Tk):
 
         self.mode = tk.StringVar(value="grid")
         self.tile_w = tk.StringVar(value="12")
-        self.tile_h = tk.StringVar(value="16")
+        self.tile_h = tk.StringVar(value="24")
         self.cols = tk.StringVar(value="3")
         self.rows = tk.StringVar(value="1")
         self.gap = tk.StringVar(value="0.75")
         self.dpi = tk.StringVar(value="300")
         self.film_w = tk.StringVar(value="305")
-        self.preset = tk.StringVar(value="12 x 16 in")
+        self.preset = tk.StringVar(value="12 x 24 in")
         self.status = tk.StringVar(value="Open a picture to begin.")
         self.summary = tk.StringVar(value="")
         self.mixed_readout = tk.StringVar(value="")
@@ -65,7 +69,7 @@ class App(tk.Tk):
         for var in (self.tile_w, self.tile_h, self.cols, self.rows,
                     self.gap, self.dpi, self.film_w):
             var.trace_add("write", lambda *_: self._schedule_preview())
-        for w, h in ((12.0, 16.0), (8.0, 10.0), (12.0, 16.0)):
+        for w, h in ((12.0, 24.0), (12.0, 12.0), (12.0, 24.0)):
             self._add_mixed_panel(w, h)
 
     # ---------------- UI ----------------
@@ -116,16 +120,16 @@ class App(tk.Tk):
         self.mixed_rows_frame = ttk.Frame(self.mixed_frame)
         self.mixed_rows_frame.pack(fill="x")
         ttk.Button(self.mixed_frame, text="Add panel",
-                   command=lambda: self._add_mixed_panel(12.0, 16.0))\
+                   command=lambda: self._add_mixed_panel(12.0, 24.0))\
             .pack(fill="x", pady=(5, 4))
         ttk.Label(self.mixed_frame, text="Quick add").pack(anchor="w")
         quick = ttk.Frame(self.mixed_frame)
         quick.pack(fill="x", pady=(0, 4))
         for w, h in MIXED_PRESETS:
             ttk.Button(quick, text=f"{_fmt_num(w)}x{_fmt_num(h)}",
-                       width=7,
+                       width=6,
                        command=lambda w=w, h=h: self._add_mixed_panel(w, h))\
-                .pack(side="left", padx=(0, 4))
+                .pack(side="left", padx=(0, 3))
         ttk.Label(self.mixed_frame, textvariable=self.mixed_readout,
                   wraplength=250, foreground="#234").pack(fill="x",
                                                           pady=(2, 2))
