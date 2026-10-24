@@ -84,30 +84,70 @@ def test_film_mixed_layout():
     assert "304 mm printable width" in text
 
 
-def test_film_mixed_partial_flatbed_and_layout_image():
+def test_film_mixed_lane_fit_and_layout_image():
+    # P1 is 12 x 16 in: a lane fit on the roll, not flatbed. P2 is a
+    # normal piece. Both place, and the layout image still renders.
     img = Image.new("RGB", (6700, 3200), (90, 90, 90))
     plan = tc.plan_mixed(6700, 3200, [(12.0, 16.0), (8.0, 10.0)], GAP, 300)
     pieces = [{"label": f"P{t['pos']}", "w_in": t["w_in"],
                "h_in": t["h_in"], "box": t["box"]} for t in plan["tiles"]]
     fp = tc.plan_film_pieces(pieces, 305.0)
+    assert fp["fits_all"] and fp["flatbed"] == []
+    assert len(fp["placements"]) == 2
+    p1, p2 = fp["placements"]
+    assert p1["lane"] is True and p2["lane"] is False
+    approx(p1["w"], 304.0)        # placed at the printable width
+    approx(p1["h"], 406.4)
+    approx(p2["y"], 616.4)        # lane piece fills its row, P2 drops down
+    fimg = tc.film_layout_image(img, plan, fp)
+    assert fimg is not None  # long roll, schematic scales to max height
+
+
+def test_film_mixed_partial_flatbed():
+    img = Image.new("RGB", (6700, 3200), (90, 90, 90))
+    plan = tc.plan_mixed(6700, 3200, [(16.0, 20.0), (8.0, 10.0)], GAP, 300)
+    pieces = [{"label": f"P{t['pos']}", "w_in": t["w_in"],
+               "h_in": t["h_in"], "box": t["box"]} for t in plan["tiles"]]
+    fp = tc.plan_film_pieces(pieces, 305.0)
     assert len(fp["placements"]) == 1
     assert [f["name"] for f in fp["flatbed"]] == ["P1"]
-    fimg = tc.film_layout_image(img, plan, fp)
-    assert fimg is not None and fimg.size[0] == int(round(305 * 3.0))
+    assert tc.film_layout_image(img, plan, fp) is not None
 
 
-def test_film_12in_piece_flagged_with_wording():
-    # 12 x 16 in is 304.8 x 406.4 mm: wider than the 304 mm usable
-    # width upright AND rotated, so it must be flagged flatbed only.
+def test_film_12in_piece_is_lane_fit():
+    # 12 x 16 in is 304.8 x 406.4 mm: over the 304 mm printable width
+    # but no wider than the 305 mm film itself, so it is a lane fit,
+    # NOT flatbed only. This is the standard 12 in lane case.
     fp = tc.plan_film_pieces([{"label": "P1", "w_in": 12.0, "h_in": 16.0}],
                              305.0)
-    assert fp["placements"] == []
-    assert len(fp["flatbed"]) == 1
-    assert not fp["fits_all"]
+    assert fp["fits_all"] and fp["flatbed"] == []
+    assert len(fp["placements"]) == 1
+    p = fp["placements"][0]
+    assert p["lane"] is True and p["rotated"] is False
+    approx(p["w"], 304.0)         # print sized to the printable width
+    approx(p["h"], 406.4)
+    approx(p["w_mm"], 304.8)      # the piece's true size is kept
     text = tc.film_summary_pieces(fp)
-    assert "Flatbed only" in text
-    assert "304 mm printable width" in text
-    assert "even rotated" in text
+    assert "Lane fit" in text
+    assert "prints centred at 304 mm on the 305 mm film" in text
+    assert "trim the clear film edges flush" in text
+    assert "Flatbed only" not in text
+
+
+def test_film_lane_fit_layout_image_band():
+    # The layout image draws the film width as a band with the lane
+    # print centred in it: the strip beside the print stays band fill.
+    img = Image.new("RGB", (2000, 2000), (50, 50, 50))
+    plan = tc.plan_tiles(2000, 2000, 12, 16, 1, 1, 0.75, 300)
+    fp = tc.plan_film(12, 16, 1, 305.0)
+    assert fp["fits"] and fp["lane_count"] == 1
+    fimg = tc.film_layout_image(img, plan, fp)
+    assert fimg is not None and fimg.size[0] == int(round(305 * 3.0))
+    # Band outline runs down both film edges beside the piece, and
+    # the centred print covers the middle.
+    assert fimg.getpixel((0, 700)) == (150, 140, 118)
+    assert fimg.getpixel((914, 700)) == (150, 140, 118)
+    assert fimg.getpixel((457, 700)) == (50, 50, 50)
 
 
 def test_film_rotation():
@@ -121,10 +161,28 @@ def test_film_rotation():
     approx(p["h"], 330.2)
 
 
+def test_film_lane_fit_rotated():
+    # 13 x 12 in: too wide upright (330.2 mm over the film), and the
+    # 12 in side (304.8 mm) is over the printable width but within the
+    # film, so it lane fits rotated.
+    fp = tc.plan_film_pieces([{"label": "P1", "w_in": 13.0, "h_in": 12.0}],
+                             305.0)
+    assert fp["fits_all"] and len(fp["placements"]) == 1
+    p = fp["placements"][0]
+    assert p["lane"] is True and p["rotated"] is True
+    approx(p["w"], 304.0)
+    approx(p["h"], 330.2)
+
+
 def test_film_16in_piece_flatbed():
+    # 16 x 20 in is 406.4 x 508 mm: wider than the 305 mm film itself
+    # either way up, still flatbed only.
     fp = tc.plan_film_pieces([{"label": "P1", "w_in": 16.0, "h_in": 20.0}],
                              305.0)
     assert fp["placements"] == [] and len(fp["flatbed"]) == 1
+    text = tc.film_summary_pieces(fp)
+    assert "Flatbed only" in text
+    assert "wider than the 305 mm film itself even rotated" in text
 
 
 def test_legacy_grid_plan_unchanged():
@@ -145,14 +203,18 @@ def test_legacy_grid_plan_unchanged():
 def test_legacy_film():
     fp = tc.plan_film(8, 10, 1, 305.0)
     assert fp["fits"] and fp["rotated"] is False and fp["per_row"] == 1
+    assert fp["lane_count"] == 0
     approx(fp["total_mm"], 464.0)
-    # Under the 1 mm safety margin rule a 12 in wide piece no longer
-    # fits a 305 mm roll (304.8 mm > 304 mm usable, 406.4 mm the
-    # other way), so the grid planner reports flatbed only.
+    # A 12 in wide piece (304.8 mm) is the standard lane case: it runs
+    # on the roll as a lane fit at the 304 mm printable width, so the
+    # grid planner reports fits, one per row, all lane fit.
     fp2 = tc.plan_film(12, 16, 3, 305.0)
-    assert fp2["fits"] is False
+    assert fp2["fits"] is True and fp2["per_row"] == 1
+    assert fp2["lane_count"] == 3
     text = tc.film_summary(fp2, 3)
-    assert "304 mm printable width" in text and "flatbed only" in text
+    assert "Lane fit" in text
+    assert "print centred at 304 mm on the 305 mm film" in text
+    assert "trim the clear film edges flush" in text
     img = Image.new("RGB", (2000, 2000), (50, 50, 50))
     plan = tc.plan_tiles(2000, 2000, 8, 10, 1, 1, 0.75, 300)
     assert tc.film_layout_image(img, plan, fp) is not None

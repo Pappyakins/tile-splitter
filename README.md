@@ -47,9 +47,16 @@ the app (305 mm by default) and every job also gets:
   in `job.txt` and in the app summary
 - pieces up to the printable width are placed as they are, pieces
   that only fit turned sideways are placed rotated 90 degrees, and
-  pieces wider than the printable width either way (a 12 in wide
-  panel is 304.8 mm, just over the 304 mm usable width) are flagged
-  as flatbed only
+  a piece between the printable width and the film width itself is
+  a **lane fit**: a true 12 in panel is 304.8 mm, just over the
+  304 mm printable width, and the standard 12 in lane case must work
+  on film, so it prints centred at 304 mm on the 305 mm film with
+  the full picture kept (a 0.26 percent difference no eye can see),
+  and the clear film edges are trimmed flush after printing. Only a
+  piece wider than the film itself either way up is flagged as
+  flatbed only. Lane fit pieces are called out in `job.txt` and
+  drawn in the film layout inside a film width band, print centred,
+  labelled LANE FIT
 
 ## Get the app
 

@@ -238,7 +238,13 @@ def job_summary(plan, tile_w_in, tile_h_in, cols, rows, gap_in, dpi, src_name,
 # about 15-20 cm of blank leader before the first print. The 305 mm max
 # print width carries a 1 mm total safety margin, so the usable
 # printable width of a roll is its width minus 1 mm (304 mm on a
-# 305 mm roll): a piece wider than that cannot be printed on the roll.
+# 305 mm roll). A piece between the usable width and the film width
+# (a true 12 in piece is 304.8 mm) is a LANE FIT: it prints centred at
+# the usable width across the film lane with the full picture kept
+# (304 mm against 304.8 mm is a 0.26 percent difference no eye can
+# see), and the clear film edges are trimmed flush after printing.
+# Only a piece wider than the film itself, either way up, is flatbed
+# only.
 FILM_WIDTH_MM = 305.0
 FILM_LEADER_MM = 200.0
 FILM_MAX_JOB_MM = 10000.0
@@ -251,12 +257,18 @@ def plan_film_pieces(pieces, film_width_mm=FILM_WIDTH_MM):
 
     pieces: [{"label": str, "w_in": float, "h_in": float, ...}]; extra
     keys (a source "box", say) are carried into the placement.
-    A piece sits upright when its width fits the printable width (film
-    width minus the 1 mm safety margin), rotated 90 degrees when only
-    its height fits across, and lands in the "flatbed" list when it is
-    wider than the printable width either way up. Returns the
-    placements in mm from the roll top (leader included), the flatbed
-    list, and the total film length."""
+    Classification, in order: a piece sits upright when its width fits
+    the printable width (film width minus the 1 mm safety margin),
+    rotated 90 degrees when only its height fits across, then a LANE
+    FIT when the oriented width is over the printable width but no
+    wider than the film itself (the standard 12 in lane case): it is
+    placed at the printable width, centred across the film lane, and
+    the clear film edges are trimmed flush after printing. Only a
+    piece wider than the film either way up lands in the "flatbed"
+    list. Placements carry "lane" (True for a lane fit), the placed
+    print size as "w"/"h", and the piece's true size as "w_mm"/"h_mm".
+    Returns the placements in mm from the roll top (leader included),
+    the flatbed list, and the total film length."""
     usable = film_width_mm - FILM_SAFETY_MM
     placements = []
     flatbed = []
@@ -267,10 +279,15 @@ def plan_film_pieces(pieces, film_width_mm=FILM_WIDTH_MM):
         w = p["w_in"] * 25.4
         h = p["h_in"] * 25.4
         label = p.get("label", f"piece {i + 1}")
+        lane = False
         if w <= usable:
             pw, ph, rotated = w, h, False
         elif h <= usable:
             pw, ph, rotated = h, w, True
+        elif w <= film_width_mm:
+            pw, ph, rotated, lane = usable, h, False, True
+        elif h <= film_width_mm:
+            pw, ph, rotated, lane = usable, w, True, True
         else:
             flatbed.append({"name": label, "w_mm": w, "h_mm": h})
             continue
@@ -279,7 +296,8 @@ def plan_film_pieces(pieces, film_width_mm=FILM_WIDTH_MM):
             x = 0.0
             row_h = 0.0
         pl = {"name": label, "x": x, "y": y, "w": pw, "h": ph,
-              "rotated": rotated, "src_index": i}
+              "rotated": rotated, "lane": lane,
+              "w_mm": w, "h_mm": h, "src_index": i}
         if "box" in p:
             pl["box"] = p["box"]
         placements.append(pl)
@@ -297,8 +315,10 @@ def plan_film(tile_w_in, tile_h_in, count, film_width_mm=FILM_WIDTH_MM):
     pieces = [{"w_in": tile_w_in, "h_in": tile_h_in}
               for _ in range(count)]
     fp = plan_film_pieces(pieces, film_width_mm)
+    lane_count = sum(1 for p in fp["placements"] if p.get("lane"))
     base = {"piece_mm": (tile_w_in * 25.4, tile_h_in * 25.4),
-            "film_width_mm": film_width_mm, "usable_mm": fp["usable_mm"]}
+            "film_width_mm": film_width_mm, "usable_mm": fp["usable_mm"],
+            "lane_count": lane_count}
     if not fp["placements"]:
         return dict(base, fits=False, placements=[], rotated=False,
                     total_mm=0.0, per_row=0)
@@ -314,11 +334,9 @@ def film_summary(fp, count):
     if not fp["fits"]:
         w, h = fp["piece_mm"]
         return (f"Roll to Film: a {w:.0f} x {h:.0f} mm piece is wider than "
-                f"the {usable:.0f} mm printable width of the "
-                f"{fp['film_width_mm']:.0f} mm film (the film width minus "
-                f"a 1 mm safety margin) either way up, flatbed only. "
-                f"Split it smaller or print it on the flatbed "
-                f"(330 x 420 mm).")
+                f"the {fp['film_width_mm']:.0f} mm film itself either way "
+                f"up, flatbed only. Split it smaller or print it on the "
+                f"flatbed (330 x 420 mm).")
     lines = [
         f"Roll to Film ({fp['film_width_mm']:.0f} mm film, "
         f"{usable:.0f} mm printable width): {count} piece(s), "
@@ -327,6 +345,12 @@ def film_summary(fp, count):
         f"Film used: {fp['total_mm'] / 1000:.2f} m including a "
         f"{FILM_LEADER_MM:.0f} mm blank leader and cutting gaps",
     ]
+    if fp.get("lane_count"):
+        lines.append(
+            f"Lane fit: {fp['lane_count']} piece(s) are the full 12 in "
+            f"lane width, they print centred at {usable:.0f} mm on the "
+            f"{fp['film_width_mm']:.0f} mm film with the full picture "
+            f"kept, trim the clear film edges flush after printing.")
     if fp["total_mm"] > FILM_MAX_JOB_MM:
         lines.append("Warning: over the 10 m continuous job limit, "
                      "split the job into two runs.")
@@ -344,21 +368,31 @@ def film_summary_pieces(fp):
     lines = []
     if fp["placements"]:
         n_rot = sum(1 for p in fp["placements"] if p["rotated"])
+        n_lane = sum(1 for p in fp["placements"] if p.get("lane"))
         lines.append(f"{head}: {len(fp['placements'])} piece(s) on the roll"
-                     + (f", {n_rot} rotated 90 degrees" if n_rot else ""))
+                     + (f", {n_rot} rotated 90 degrees" if n_rot else "")
+                     + (f", {n_lane} lane fit" if n_lane else ""))
         lines.append(f"Film used: {fp['total_mm'] / 1000:.2f} m including a "
                      f"{FILM_LEADER_MM:.0f} mm blank leader and cutting gaps")
         if fp["total_mm"] > FILM_MAX_JOB_MM:
             lines.append("Warning: over the 10 m continuous job limit, "
                          "split the job into two runs.")
+        for p in fp["placements"]:
+            if p.get("lane"):
+                lines.append(
+                    f"Lane fit: {p['name']} ({p['w_mm']:.0f} x "
+                    f"{p['h_mm']:.0f} mm) prints centred at "
+                    f"{usable:.0f} mm on the {fw:.0f} mm film, full "
+                    f"picture kept, trim the clear film edges flush "
+                    f"after printing.")
     else:
         lines.append(f"{head}: nothing fits the roll, every piece is "
                      f"flatbed only.")
     for f in fp["flatbed"]:
         lines.append(
             f"Flatbed only: {f['name']} ({f['w_mm']:.0f} x {f['h_mm']:.0f} mm) "
-            f"is wider than the {usable:.0f} mm printable width even "
-            f"rotated. Print it on the flatbed (330 x 420 mm) instead.")
+            f"is wider than the {fw:.0f} mm film itself even rotated. "
+            f"Print it on the flatbed (330 x 420 mm) instead.")
     lines.append("Use Flexible White Ink for roll modes with white, "
                  "standard white can shrink and curl film.")
     return "\n".join(lines)
@@ -405,10 +439,18 @@ def film_layout_image(img, plan, fp, max_h=2600):
             continue
         label = t["name"] if (t is not None and "box" not in p) \
             else p["name"]
-        dx = int(round(p["x"] * scale))
         dy = int(round(p["y"] * scale))
         dw = int(round(p["w"] * scale))
         dh = int(round(p["h"] * scale))
+        if p.get("lane"):
+            # Lane fit: draw the full film width as a visible band, the
+            # print area centred in it, clear edges left to trim flush.
+            d.rectangle([0, dy, W - 1, dy + dh - 1], fill=(226, 219, 204),
+                        outline=(150, 140, 118), width=2)
+            dx = int(round((fp["film_width_mm"] - p["w"]) / 2 * scale))
+            label += " LANE FIT"
+        else:
+            dx = int(round(p["x"] * scale))
         piece = img.crop(box)
         if p.get("rotated", fp.get("rotated", False)):
             piece = piece.rotate(-90, expand=True)
@@ -420,6 +462,14 @@ def film_layout_image(img, plan, fp, max_h=2600):
         d.rectangle([dx + 8, dy + 8, dx + 24 + lw, dy + 46], fill=(0, 0, 0))
         d.text((dx + 16, dy + 13), label, fill=(255, 210, 90),
                font=font)
+        if p.get("lane"):
+            note = "prints centred, trim clear edges flush"
+            bbox = d.textbbox((0, 0), note, font=small)
+            nw = bbox[2] - bbox[0]
+            d.rectangle([dx + 8, dy + 50, dx + 20 + nw, dy + 82],
+                        fill=(0, 0, 0))
+            d.text((dx + 14, dy + 54), note, fill=(255, 255, 255),
+                   font=small)
     d.text((12, H - 40),
            f"Total film: {fp['total_mm'] / 1000:.2f} m", fill=(60, 56, 48),
            font=small)
