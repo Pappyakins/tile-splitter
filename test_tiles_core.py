@@ -129,14 +129,15 @@ def test_film_12in_piece_is_lane_fit():
     approx(p["w_mm"], 304.8)      # the piece's true size is kept
     text = tc.film_summary_pieces(fp)
     assert "Lane fit" in text
-    assert "prints centred at 304 mm on the 305 mm film" in text
-    assert "trim the clear film edges flush" in text
+    assert "prints at full design width" in text
+    assert "0.4 mm clipped per side as bleed" in text
+    assert "trim the film flush" in text
     assert "Flatbed only" not in text
 
 
 def test_film_lane_fit_layout_image_band():
     # The layout image draws the film width as a band with the lane
-    # print centred in it: the strip beside the print stays band fill.
+    # print area in it: the strip beside the print stays band fill.
     img = Image.new("RGB", (2000, 2000), (50, 50, 50))
     plan = tc.plan_tiles(2000, 2000, 12, 16, 1, 1, 0.75, 300)
     fp = tc.plan_film(12, 16, 1, 305.0)
@@ -144,7 +145,7 @@ def test_film_lane_fit_layout_image_band():
     fimg = tc.film_layout_image(img, plan, fp)
     assert fimg is not None and fimg.size[0] == int(round(305 * 3.0))
     # Band outline runs down both film edges beside the piece, and
-    # the centred print covers the middle.
+    # the print area covers the middle.
     assert fimg.getpixel((0, 700)) == (150, 140, 118)
     assert fimg.getpixel((914, 700)) == (150, 140, 118)
     assert fimg.getpixel((457, 700)) == (50, 50, 50)
@@ -206,15 +207,16 @@ def test_legacy_film():
     assert fp["lane_count"] == 0
     approx(fp["total_mm"], 464.0)
     # A 12 in wide piece (304.8 mm) is the standard lane case: it runs
-    # on the roll as a lane fit at the 304 mm printable width, so the
-    # grid planner reports fits, one per row, all lane fit.
+    # on the roll as a lane fit (full bleed), so the grid planner
+    # reports fits, one per row, all lane fit.
     fp2 = tc.plan_film(12, 16, 3, 305.0)
     assert fp2["fits"] is True and fp2["per_row"] == 1
     assert fp2["lane_count"] == 3
     text = tc.film_summary(fp2, 3)
     assert "Lane fit" in text
-    assert "print centred at 304 mm on the 305 mm film" in text
-    assert "trim the clear film edges flush" in text
+    assert "print at full design width" in text
+    assert "0.4 mm clipped per side as bleed" in text
+    assert "trim the film flush" in text
     img = Image.new("RGB", (2000, 2000), (50, 50, 50))
     plan = tc.plan_tiles(2000, 2000, 8, 10, 1, 1, 0.75, 300)
     assert tc.film_layout_image(img, plan, fp) is not None

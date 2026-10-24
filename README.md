@@ -50,13 +50,13 @@ the app (305 mm by default) and every job also gets:
   a piece between the printable width and the film width itself is
   a **lane fit**: a true 12 in panel is 304.8 mm, just over the
   304 mm printable width, and the standard 12 in lane case must work
-  on film, so it prints centred at 304 mm on the 305 mm film with
-  the full picture kept (a 0.26 percent difference no eye can see),
-  and the clear film edges are trimmed flush after printing. Only a
-  piece wider than the film itself either way up is flagged as
-  flatbed only. Lane fit pieces are called out in `job.txt` and
-  drawn in the film layout inside a film width band, print centred,
-  labelled LANE FIT
+  on film, so it runs as a full bleed, the piece prints at its full
+  design width and the printer clips 0.4 mm per side as bleed, so
+  the image reaches the board edge with no unprinted border, then
+  the film is trimmed flush after printing. Only a piece wider than
+  the film itself either way up is flagged as flatbed only. Lane fit
+  pieces are called out in `job.txt` and drawn in the film layout
+  inside a film width band, labelled LANE FIT
 
 ## Get the app
 

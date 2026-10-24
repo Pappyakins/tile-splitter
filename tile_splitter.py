@@ -17,7 +17,7 @@ from tiles_core import (plan_tiles, split_image, assembly_map, job_summary,
                         plan_mixed, assembly_map_mixed, job_summary_mixed,
                         plan_film_pieces, film_summary_pieces)
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 # Standard sizes are multiples of 12 in, matching the 12 inch print
 # width of the roll to film attachment. Anything else stays available
@@ -141,8 +141,9 @@ class App(tk.Tk):
                   text="Printable width is the film width minus a 1 mm "
                        "safety margin, so a 305 mm roll prints 304 mm "
                        "wide. A full 12 in piece still runs as a lane "
-                       "fit, printed centred at 304 mm on the 305 mm "
-                       "film, clear edges trimmed flush.").pack(
+                       "fit, printed at full design width with 0.4 mm "
+                       "clipped per side as bleed, so the image reaches "
+                       "the board edge, then trimmed flush.").pack(
                            fill="x", pady=(0, 4))
 
         ttk.Label(left, textvariable=self.summary, wraplength=250,
@@ -329,9 +330,9 @@ class App(tk.Tk):
         fp = plan_film(tw, th, cols * rows, film_w)
         film_line = (f"Film: {fp['total_mm'] / 1000:.2f} m of "
                      f"{film_w:.0f} mm roll incl. leader"
-                     + (f", {fp['lane_count']} lane fit (centred at "
-                        f"{fp['usable_mm']:.0f} mm, trim clear edges "
-                        f"flush)" if fp.get("lane_count") else "")
+                     + (f", {fp['lane_count']} lane fit (full bleed, "
+                        f"0.4 mm clips per side, trim flush)"
+                        if fp.get("lane_count") else "")
                      if fp["fits"] else
                      "Film: pieces too wide for the roll, flatbed only")
         self.summary.set(
@@ -361,8 +362,8 @@ class App(tk.Tk):
         eff = plan["eff_dpi"]
         fp = plan_film_pieces(self._mixed_pieces(plan), film_w)
         n_lane = sum(1 for p in fp["placements"] if p.get("lane"))
-        lane_note = (f", {n_lane} lane fit (centred at "
-                     f"{fp['usable_mm']:.0f} mm, trim clear edges flush)"
+        lane_note = (f", {n_lane} lane fit (full bleed, 0.4 mm clips "
+                     f"per side, trim flush)"
                      if n_lane else "")
         if fp["fits_all"]:
             film_line = (f"Film: all {len(panels)} pieces fit, "

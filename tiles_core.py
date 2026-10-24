@@ -239,12 +239,12 @@ def job_summary(plan, tile_w_in, tile_h_in, cols, rows, gap_in, dpi, src_name,
 # print width carries a 1 mm total safety margin, so the usable
 # printable width of a roll is its width minus 1 mm (304 mm on a
 # 305 mm roll). A piece between the usable width and the film width
-# (a true 12 in piece is 304.8 mm) is a LANE FIT: it prints centred at
-# the usable width across the film lane with the full picture kept
-# (304 mm against 304.8 mm is a 0.26 percent difference no eye can
-# see), and the clear film edges are trimmed flush after printing.
-# Only a piece wider than the film itself, either way up, is flatbed
-# only.
+# (a true 12 in piece is 304.8 mm) is a LANE FIT, and it runs as a
+# full bleed: the piece prints at its full design width and the
+# printer clips 0.4 mm per side as bleed, so the image reaches the
+# board edge with no unprinted border, then the film is trimmed
+# flush after printing. Only a piece wider than the film itself,
+# either way up, is flatbed only.
 FILM_WIDTH_MM = 305.0
 FILM_LEADER_MM = 200.0
 FILM_MAX_JOB_MM = 10000.0
@@ -261,9 +261,12 @@ def plan_film_pieces(pieces, film_width_mm=FILM_WIDTH_MM):
     the printable width (film width minus the 1 mm safety margin),
     rotated 90 degrees when only its height fits across, then a LANE
     FIT when the oriented width is over the printable width but no
-    wider than the film itself (the standard 12 in lane case): it is
-    placed at the printable width, centred across the film lane, and
-    the clear film edges are trimmed flush after printing. Only a
+    wider than the film itself (the standard 12 in lane case): it
+    prints at its full design width as a full bleed, the printer
+    clips 0.4 mm per side as bleed so the image reaches the board
+    edge with no unprinted border, and the film is trimmed flush
+    after printing. Its layout placement is still drawn at the
+    printable width in the film schematic. Only a
     piece wider than the film either way up lands in the "flatbed"
     list. Placements carry "lane" (True for a lane fit), the placed
     print size as "w"/"h", and the piece's true size as "w_mm"/"h_mm".
@@ -348,9 +351,10 @@ def film_summary(fp, count):
     if fp.get("lane_count"):
         lines.append(
             f"Lane fit: {fp['lane_count']} piece(s) are the full 12 in "
-            f"lane width, they print centred at {usable:.0f} mm on the "
-            f"{fp['film_width_mm']:.0f} mm film with the full picture "
-            f"kept, trim the clear film edges flush after printing.")
+            f"lane width, they print at full design width with "
+            f"0.4 mm clipped per side as bleed, so the image reaches "
+            f"the board edge with no unprinted border, trim the film "
+            f"flush after printing.")
     if fp["total_mm"] > FILM_MAX_JOB_MM:
         lines.append("Warning: over the 10 m continuous job limit, "
                      "split the job into two runs.")
@@ -381,10 +385,10 @@ def film_summary_pieces(fp):
             if p.get("lane"):
                 lines.append(
                     f"Lane fit: {p['name']} ({p['w_mm']:.0f} x "
-                    f"{p['h_mm']:.0f} mm) prints centred at "
-                    f"{usable:.0f} mm on the {fw:.0f} mm film, full "
-                    f"picture kept, trim the clear film edges flush "
-                    f"after printing.")
+                    f"{p['h_mm']:.0f} mm) prints at full design width, "
+                    f"0.4 mm clipped per side as bleed, so the image "
+                    f"reaches the board edge with no unprinted border, "
+                    f"trim the film flush after printing.")
     else:
         lines.append(f"{head}: nothing fits the roll, every piece is "
                      f"flatbed only.")
@@ -443,8 +447,9 @@ def film_layout_image(img, plan, fp, max_h=2600):
         dw = int(round(p["w"] * scale))
         dh = int(round(p["h"] * scale))
         if p.get("lane"):
-            # Lane fit: draw the full film width as a visible band, the
-            # print area centred in it, clear edges left to trim flush.
+            # Lane fit (full bleed): draw the full film width as a
+            # visible band, the print area in it, film trimmed flush
+            # after printing.
             d.rectangle([0, dy, W - 1, dy + dh - 1], fill=(226, 219, 204),
                         outline=(150, 140, 118), width=2)
             dx = int(round((fp["film_width_mm"] - p["w"]) / 2 * scale))
@@ -463,7 +468,7 @@ def film_layout_image(img, plan, fp, max_h=2600):
         d.text((dx + 16, dy + 13), label, fill=(255, 210, 90),
                font=font)
         if p.get("lane"):
-            note = "prints centred, trim clear edges flush"
+            note = "full bleed, 0.4 mm clips per side, trim flush"
             bbox = d.textbbox((0, 0), note, font=small)
             nw = bbox[2] - bbox[0]
             d.rectangle([dx + 8, dy + 50, dx + 20 + nw, dy + 82],
