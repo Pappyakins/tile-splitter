@@ -50,12 +50,132 @@ def plan_tiles(img_w, img_h, tile_w_in, tile_h_in, cols, rows, gap_in, dpi):
 
 
 def split_image(img, plan, out_fmt="PNG"):
-    """Cut the tiles per plan. Returns {name: PIL.Image} at print size."""
+    """Cut the tiles per plan. Returns {name: PIL.Image} at print size.
+    Works for grid plans and mixed plans alike: every tile entry carries
+    its own source box and output pixel size."""
     result = {}
     for t in plan["tiles"]:
         piece = img.crop(t["box"]).resize(t["out"], Image.LANCZOS)
         result[t["name"]] = piece
     return result
+
+
+def _fmt_dim(v):
+    """12.0 -> '12', 12.5 -> '12.5', for filenames and labels."""
+    return f"{v:g}"
+
+
+def plan_mixed(img_w, img_h, panels, gap_in, dpi):
+    """Plan a row of different sized panels hung side by side.
+
+    panels: ordered list of (w_in, h_in), left to right, centre-aligned
+    vertically against the tallest panel. The source is cover-cropped
+    to the whole arrangement's aspect, then each panel samples its own
+    window (offsets include the hanging gaps, same rule as the grid).
+    Returns a plan in the same shape as plan_tiles; each tile entry also
+    carries its wall offsets (x_in, y_in, measured from the arrangement's
+    top-left) and its own size and output pixels."""
+    n = len(panels)
+    total_w_in = sum(w for w, _ in panels) + gap_in * max(0, n - 1)
+    total_h_in = max(h for _, h in panels)
+    target = total_w_in / total_h_in
+    src = img_w / img_h
+    if src > target:
+        crop_h = img_h
+        crop_w = int(round(img_h * target))
+    else:
+        crop_w = img_w
+        crop_h = int(round(img_w / target))
+    x0 = (img_w - crop_w) // 2
+    y0 = (img_h - crop_h) // 2
+    sx = crop_w / total_w_in   # source px per wall inch (x)
+    sy = crop_h / total_h_in   # source px per wall inch (y)
+    tiles = []
+    x_in = 0.0
+    for i, (w_in, h_in) in enumerate(panels):
+        y_in = (total_h_in - h_in) / 2.0
+        ix = x0 + int(round(x_in * sx))
+        iy = y0 + int(round(y_in * sy))
+        iw = int(round(w_in * sx))
+        ih = int(round(h_in * sy))
+        tiles.append({
+            "row": 1, "col": i + 1, "pos": i + 1,
+            "box": (ix, iy, ix + iw, iy + ih),
+            "out": (int(round(w_in * dpi)), int(round(h_in * dpi))),
+            "x_in": x_in, "y_in": y_in, "w_in": w_in, "h_in": h_in,
+            "name": f"tile_P{i + 1}_{_fmt_dim(w_in)}x{_fmt_dim(h_in)}",
+        })
+        x_in += w_in + gap_in
+    return {
+        "crop": (x0, y0, x0 + crop_w, y0 + crop_h),
+        "total_in": (total_w_in, total_h_in),
+        "tiles": tiles,
+        "eff_dpi": min(sx, sy),
+        "out_px": tiles[0]["out"] if tiles else (0, 0),
+        "mixed": True,
+    }
+
+
+def assembly_map_mixed(img, plan, max_w=1400):
+    """Labelled preview of a mixed-size arrangement: every panel drawn
+    at its true wall position (centre-aligned, real gaps), labelled
+    P<n> with its size."""
+    tw, th = plan["total_in"]
+    scale = max_w / tw
+    W = int(round(tw * scale))
+    H = int(round(th * scale))
+    canvas = Image.new("RGB", (W, H), (38, 38, 42))
+    d = ImageDraw.Draw(canvas)
+    min_h = min(t["h_in"] for t in plan["tiles"])
+    try:
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            max(15, int(min_h * scale * 0.13)))
+    except Exception:
+        font = ImageFont.load_default()
+    for t in plan["tiles"]:
+        dx = int(round(t["x_in"] * scale))
+        dy = int(round(t["y_in"] * scale))
+        dw = int(round(t["w_in"] * scale))
+        dh = int(round(t["h_in"] * scale))
+        piece = img.crop(t["box"]).resize((dw, dh), Image.LANCZOS)
+        canvas.paste(piece, (dx, dy))
+        label = f"P{t['pos']}  {_fmt_dim(t['w_in'])}x{_fmt_dim(t['h_in'])} in"
+        pad = 6
+        bbox = d.textbbox((0, 0), label, font=font)
+        lw, lh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        d.rectangle([dx + pad, dy + pad, dx + pad + lw + 12, dy + pad + lh + 10],
+                    fill=(0, 0, 0))
+        d.text((dx + pad + 6, dy + pad + 4), label, fill=(255, 210, 90),
+               font=font)
+    return canvas
+
+
+def job_summary_mixed(plan, panels, gap_in, dpi, src_name, film_text=""):
+    tw, th = plan["total_in"]
+    lines = [
+        "Tile Splitter job",
+        f"Source picture: {src_name}",
+        f"Layout: {len(panels)} different sized panels side by side, "
+        f"centred vertically",
+        f"Hanging gap: {gap_in} in (already in the math, hang panels "
+        f"with this gap)",
+        f"Total wall size: {tw:.2f} x {th:.2f} in "
+        f"({tw * 2.54:.1f} x {th * 2.54:.1f} cm)",
+        "Panels, left to right:",
+    ]
+    for t in plan["tiles"]:
+        ow, oh = t["out"]
+        lines.append(
+            f"  P{t['pos']}: {_fmt_dim(t['w_in'])} x {_fmt_dim(t['h_in'])} in, "
+            f"starts {t['x_in']:.2f} in from the left, its top sits "
+            f"{t['y_in']:.2f} in below the tallest panel's top, "
+            f"file {t['name']}.png -> {ow} x {oh} px at {dpi} DPI")
+    lines.append(f"Source resolution over the artwork: about "
+                 f"{plan['eff_dpi']:.0f} px per inch")
+    if film_text:
+        lines += ["", film_text]
+    return "\n".join(lines) + "\n"
 
 
 def assembly_map(img, plan, gap_in, tile_w_in, tile_h_in, max_w=1400):
@@ -115,61 +235,93 @@ def job_summary(plan, tile_w_in, tile_h_in, cols, rows, gap_in, dpi, src_name,
 
 # ================= Roll to Film (eufyMake E1 attachment) =================
 # Official figures: film 100-305 mm wide, up to 10 m continuous per job,
-# about 15-20 cm of blank leader before the first print.
+# about 15-20 cm of blank leader before the first print. The 305 mm max
+# print width carries a 1 mm total safety margin, so the usable
+# printable width of a roll is its width minus 1 mm (304 mm on a
+# 305 mm roll): a piece wider than that cannot be printed on the roll.
 FILM_WIDTH_MM = 305.0
 FILM_LEADER_MM = 200.0
 FILM_MAX_JOB_MM = 10000.0
 FILM_CUT_GAP_MM = 10.0
+FILM_SAFETY_MM = 1.0
+
+
+def plan_film_pieces(pieces, film_width_mm=FILM_WIDTH_MM):
+    """Lay a list of pieces down a film roll, shelf style, in order.
+
+    pieces: [{"label": str, "w_in": float, "h_in": float, ...}]; extra
+    keys (a source "box", say) are carried into the placement.
+    A piece sits upright when its width fits the printable width (film
+    width minus the 1 mm safety margin), rotated 90 degrees when only
+    its height fits across, and lands in the "flatbed" list when it is
+    wider than the printable width either way up. Returns the
+    placements in mm from the roll top (leader included), the flatbed
+    list, and the total film length."""
+    usable = film_width_mm - FILM_SAFETY_MM
+    placements = []
+    flatbed = []
+    y = FILM_LEADER_MM
+    x = 0.0
+    row_h = 0.0
+    for i, p in enumerate(pieces):
+        w = p["w_in"] * 25.4
+        h = p["h_in"] * 25.4
+        label = p.get("label", f"piece {i + 1}")
+        if w <= usable:
+            pw, ph, rotated = w, h, False
+        elif h <= usable:
+            pw, ph, rotated = h, w, True
+        else:
+            flatbed.append({"name": label, "w_mm": w, "h_mm": h})
+            continue
+        if x > 0 and x + pw > usable:
+            y += row_h + FILM_CUT_GAP_MM
+            x = 0.0
+            row_h = 0.0
+        pl = {"name": label, "x": x, "y": y, "w": pw, "h": ph,
+              "rotated": rotated, "src_index": i}
+        if "box" in p:
+            pl["box"] = p["box"]
+        placements.append(pl)
+        x += pw + FILM_CUT_GAP_MM
+        row_h = max(row_h, ph)
+    total = (y + row_h + FILM_CUT_GAP_MM) if placements else 0.0
+    return {"placements": placements, "flatbed": flatbed,
+            "fits_all": not flatbed, "total_mm": total,
+            "film_width_mm": film_width_mm, "usable_mm": usable}
 
 
 def plan_film(tile_w_in, tile_h_in, count, film_width_mm=FILM_WIDTH_MM):
-    """Lay identical pieces down a film roll, shelf style.
-    Each piece is used upright when it fits the film width, rotated 90
-    degrees when only the long side fits across, and flagged when it
-    cannot fit either way. Returns placements in mm from the roll top
-    (leader included) plus the total film length."""
-    w = tile_w_in * 25.4
-    h = tile_h_in * 25.4
-    fits_up = w <= film_width_mm
-    fits_rot = h <= film_width_mm
-    if fits_up:
-        pw, ph, rotated = w, h, False
-    elif fits_rot:
-        pw, ph, rotated = h, w, True
-    else:
-        return {"fits": False, "placements": [], "rotated": False,
-                "piece_mm": (w, h), "total_mm": 0.0,
-                "film_width_mm": film_width_mm}
-    per_row = max(1, int((film_width_mm + FILM_CUT_GAP_MM) //
-                         (pw + FILM_CUT_GAP_MM)))
-    placements = []
-    y = FILM_LEADER_MM
-    x = 0.0
-    in_row = 0
-    for i in range(count):
-        if in_row == per_row:
-            y += ph + FILM_CUT_GAP_MM
-            x = 0.0
-            in_row = 0
-        placements.append({"name": f"piece {i + 1}", "x": x, "y": y,
-                           "w": pw, "h": ph})
-        x += pw + FILM_CUT_GAP_MM
-        in_row += 1
-    total = y + ph + FILM_CUT_GAP_MM
-    return {"fits": True, "placements": placements, "rotated": rotated,
-            "piece_mm": (w, h), "total_mm": total,
-            "film_width_mm": film_width_mm, "per_row": per_row}
+    """Lay identical pieces down a film roll (see plan_film_pieces),
+    in the original return shape for the grid workflow."""
+    pieces = [{"w_in": tile_w_in, "h_in": tile_h_in}
+              for _ in range(count)]
+    fp = plan_film_pieces(pieces, film_width_mm)
+    base = {"piece_mm": (tile_w_in * 25.4, tile_h_in * 25.4),
+            "film_width_mm": film_width_mm, "usable_mm": fp["usable_mm"]}
+    if not fp["placements"]:
+        return dict(base, fits=False, placements=[], rotated=False,
+                    total_mm=0.0, per_row=0)
+    first_y = fp["placements"][0]["y"]
+    per_row = sum(1 for p in fp["placements"] if p["y"] == first_y)
+    return dict(base, fits=True, placements=fp["placements"],
+                rotated=fp["placements"][0]["rotated"],
+                total_mm=fp["total_mm"], per_row=per_row)
 
 
 def film_summary(fp, count):
+    usable = fp.get("usable_mm", fp["film_width_mm"] - FILM_SAFETY_MM)
     if not fp["fits"]:
         w, h = fp["piece_mm"]
-        return (f"Roll to Film: a {w:.0f} x {h:.0f} mm piece does not fit "
-                f"the {fp['film_width_mm']:.0f} mm film either way up. "
+        return (f"Roll to Film: a {w:.0f} x {h:.0f} mm piece is wider than "
+                f"the {usable:.0f} mm printable width of the "
+                f"{fp['film_width_mm']:.0f} mm film (the film width minus "
+                f"a 1 mm safety margin) either way up, flatbed only. "
                 f"Split it smaller or print it on the flatbed "
                 f"(330 x 420 mm).")
     lines = [
-        f"Roll to Film ({fp['film_width_mm']:.0f} mm film): {count} piece(s), "
+        f"Roll to Film ({fp['film_width_mm']:.0f} mm film, "
+        f"{usable:.0f} mm printable width): {count} piece(s), "
         f"{fp['per_row']} across"
         + (" (pieces rotated 90 degrees on the film)" if fp["rotated"] else ""),
         f"Film used: {fp['total_mm'] / 1000:.2f} m including a "
@@ -183,10 +335,43 @@ def film_summary(fp, count):
     return "\n".join(lines)
 
 
+def film_summary_pieces(fp):
+    """Film summary for a mixed piece list (see plan_film_pieces)."""
+    usable = fp["usable_mm"]
+    fw = fp["film_width_mm"]
+    head = (f"Roll to Film ({fw:.0f} mm film, {usable:.0f} mm printable "
+            f"width after the 1 mm safety margin)")
+    lines = []
+    if fp["placements"]:
+        n_rot = sum(1 for p in fp["placements"] if p["rotated"])
+        lines.append(f"{head}: {len(fp['placements'])} piece(s) on the roll"
+                     + (f", {n_rot} rotated 90 degrees" if n_rot else ""))
+        lines.append(f"Film used: {fp['total_mm'] / 1000:.2f} m including a "
+                     f"{FILM_LEADER_MM:.0f} mm blank leader and cutting gaps")
+        if fp["total_mm"] > FILM_MAX_JOB_MM:
+            lines.append("Warning: over the 10 m continuous job limit, "
+                         "split the job into two runs.")
+    else:
+        lines.append(f"{head}: nothing fits the roll, every piece is "
+                     f"flatbed only.")
+    for f in fp["flatbed"]:
+        lines.append(
+            f"Flatbed only: {f['name']} ({f['w_mm']:.0f} x {f['h_mm']:.0f} mm) "
+            f"is wider than the {usable:.0f} mm printable width even "
+            f"rotated. Print it on the flatbed (330 x 420 mm) instead.")
+    lines.append("Use Flexible White Ink for roll modes with white, "
+                 "standard white can shrink and curl film.")
+    return "\n".join(lines)
+
+
 def film_layout_image(img, plan, fp, max_h=2600):
-    """Schematic of the roll: leader band, then every tile placed at its
-    film position with its name, true proportions."""
-    if not fp["fits"]:
+    """Schematic of the roll: leader band, then every piece placed at
+    its film position with its name, true proportions. Works with the
+    grid plan_film result and with plan_film_pieces: a placement that
+    carries its own source "box" (the mixed workflow) is labelled with
+    its piece name, otherwise the plan tile at the same index supplies
+    the picture and the tile name."""
+    if not fp["placements"]:
         return None
     scale = 3.0  # px per mm
     W = int(round(fp["film_width_mm"] * scale))
@@ -210,20 +395,30 @@ def film_layout_image(img, plan, fp, max_h=2600):
     d.text((12, leader_h // 2 - 14),
            f"BLANK LEADER {FILM_LEADER_MM:.0f} mm", fill=(90, 84, 70),
            font=small)
-    tiles = plan["tiles"]
-    for t, p in zip(tiles, fp["placements"]):
+    tiles = plan["tiles"] if plan else []
+    for p in fp["placements"]:
+        t = None
+        if p.get("src_index") is not None and p["src_index"] < len(tiles):
+            t = tiles[p["src_index"]]
+        box = p.get("box") or (t["box"] if t else None)
+        if box is None:
+            continue
+        label = t["name"] if (t is not None and "box" not in p) \
+            else p["name"]
         dx = int(round(p["x"] * scale))
         dy = int(round(p["y"] * scale))
         dw = int(round(p["w"] * scale))
         dh = int(round(p["h"] * scale))
-        piece = img.crop(t["box"])
-        if fp["rotated"]:
+        piece = img.crop(box)
+        if p.get("rotated", fp.get("rotated", False)):
             piece = piece.rotate(-90, expand=True)
         canvas.paste(piece.resize((dw, dh), Image.LANCZOS), (dx, dy))
         d.rectangle([dx, dy, dx + dw - 1, dy + dh - 1],
                     outline=(200, 40, 40), width=3)
-        d.rectangle([dx + 8, dy + 8, dx + 150, dy + 46], fill=(0, 0, 0))
-        d.text((dx + 16, dy + 13), t["name"], fill=(255, 210, 90),
+        bbox = d.textbbox((0, 0), label, font=font)
+        lw = bbox[2] - bbox[0]
+        d.rectangle([dx + 8, dy + 8, dx + 24 + lw, dy + 46], fill=(0, 0, 0))
+        d.text((dx + 16, dy + 13), label, fill=(255, 210, 90),
                font=font)
     d.text((12, H - 40),
            f"Total film: {fp['total_mm'] / 1000:.2f} m", fill=(60, 56, 48),
